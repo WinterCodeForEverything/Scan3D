@@ -1,0 +1,29 @@
+# Executables
+*.exe
+*.out
+*.app
+3rd_party/lib3mf/AutomaticComponentToolkit/bin/act.linux
+3rd_party/lib3mf/AutomaticComponentToolkit/bin/act.darwin
+
+# Compiled objects and libraries
+*.o
+*.obj
+*.so
+*.so.*
+*.dylib
+*.dll
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# Binary data/docs not needed to build
+*.pdf
+*.stl
+*.3mf
+
+# Build output and OS files
+build/
+cmake-build-*/
+.DS_Store

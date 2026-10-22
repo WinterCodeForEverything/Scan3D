@@ -1,0 +1,176 @@
+#include <module/fileio/surface_mesh_io.h>
+#include <module/core/types.h>
+#include <module/core/surface_mesh.h>
+#include <module/core/manifold_builder.h>
+#include <module/util/line_stream.h>
+#include <module/util/logging.h>
+
+#include <fstream>
+#include <cstring> // for strlen()
+
+
+#define RESOLVE_NONMANIFOLDNESS    1
+
+namespace scan3d {
+
+	namespace io {
+
+        namespace details {
+            // Some OFF files may skip lines
+            static void get_line(LineInputStream& in) {
+                in.get_line() ;
+                const char* p =  in.current_line().c_str();
+                while(!in.eof() && (strlen(p) == 0 || !isprint(*p))) {
+                    in.get_line() ;
+                    p = in.current_line().c_str();
+                }
+            }
+        }
+
+		bool load_off(const std::string& file_name, SurfaceMesh* mesh)
+		{
+			if (!mesh) {
+				LOG(ERROR) << "null mesh pointer";
+				return false;
+			}
+
+            std::ifstream in(file_name.c_str()) ;
+            if(in.fail()) {
+				LOG(ERROR) << "Could not open file: " << file_name;
+                return false ;
+            }
+
+            mesh->clear();
+
+#if RESOLVE_NONMANIFOLDNESS
+            ManifoldBuilder builder(mesh);
+            builder.begin_surface();
+#endif
+
+            // Vertex index starts by 0 in off format.
+
+            LineInputStream input(in) ;
+            details::get_line(input) ;
+
+            std::string magic ;
+            input >> magic ;
+
+            // NOFF is for Grimage "visual shapes".
+            if(magic != "OFF" && magic != "NOFF") {
+				LOG(ERROR) << "Not an OFF file. Key word is: " << magic;
+                return false;
+            }
+
+            if(magic != "NOFF") {
+                details::get_line(input) ;
+            }
+
+            int nb_vertices, nb_facets, nb_edges;
+            input >> nb_vertices >> nb_facets >> nb_edges;
+            if (input.fail()) {
+				LOG(ERROR) << "An error in the file header: " << input.current_line();
+                return false;
+            }
+
+            for (int i = 0; i < nb_vertices; i++) {
+                vec3 p;
+                details::get_line(input);
+                input >> p;
+                if (!input.fail()) {
+#if RESOLVE_NONMANIFOLDNESS
+                    builder.add_vertex(p);
+#else
+                    mesh->add_vertex(p);
+#endif
+                }
+                else {
+                    LOG_FIRST_N(ERROR, 1) << "failed reading the " << i << "_th vertex from file (this is the first record)";
+                }
+            }
+
+            for (int i = 0; i < nb_facets; i++) {
+                int nb_vertices;
+                details::get_line(input);
+                input >> nb_vertices;
+
+				if (!input.fail()) {
+					std::vector<SurfaceMesh::Vertex> vertices;
+					for (int j = 0; j < nb_vertices; j++) {
+						int index;
+						input >> index;
+						if (!input.fail()) {
+                            vertices.emplace_back(SurfaceMesh::Vertex(index));
+                        }
+                        else {
+                            LOG_FIRST_N(ERROR, 1) << "failed reading the " << j << "_th vertex of the " << i << "_th face from file (this is the first record)";
+                        }
+					}
+#if RESOLVE_NONMANIFOLDNESS
+					builder.add_face(vertices);
+#else
+                    mesh->add_face(vertices);
+#endif
+				}
+                else {
+                    LOG_FIRST_N(ERROR, 1) << "failed reading the " << i << "_th face from file (this is the first record)";
+                }
+            }
+
+            // for mesh models, we can simply ignore the edges.
+//            for (int i = 0; i < nb_edges; i++) {
+//                // read the edges
+//            }
+
+#if RESOLVE_NONMANIFOLDNESS
+            builder.end_surface();
+#endif
+            return mesh->n_faces() > 0;
+		}
+
+
+		//-----------------------------------------------------------------------------
+
+
+		bool save_off(const std::string& file_name, const SurfaceMesh* mesh)
+		{
+			if (!mesh) {
+				LOG(ERROR) << "null mesh pointer";
+				return false;
+			}
+
+            std::ofstream out(file_name.c_str()) ;
+            if(out.fail()) {
+				LOG(ERROR) << "could not open file: " << file_name;
+                return false ;
+            }
+            out.precision(10) ;
+
+            out << "OFF" << std::endl;
+            out << mesh->n_vertices() << " " << mesh->n_faces() << " 0" << std::endl;
+
+            // Output Vertices
+            // Off files numbering starts with 0
+            SurfaceMesh::VertexProperty<vec3> points = mesh->get_vertex_property<vec3>("v:point");
+            for (auto v : mesh->vertices())
+                out << points[v] << std::endl;
+
+            // Output facets
+            for (auto f : mesh->faces())
+            {
+                out << mesh->valence(f);
+
+                SurfaceMesh::VertexAroundFaceCirculator fvit = mesh->vertices(f), fvend = fvit;
+                do {
+                    SurfaceMesh::Vertex v = (*fvit);
+                    out << " " << v.idx();
+                    ++fvit;
+                } while (fvit != fvend);
+                out << std::endl;
+            }
+
+            return true;
+		}
+
+	} // namespace io
+
+} // namespace scan3d
